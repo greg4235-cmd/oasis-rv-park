@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Oasis RV Park</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Oasis RV Park">
+<meta name="theme-color" content="#1F3A2E">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --pine:#1F3A2E;--pine-light:#2A4B3B;--gravel:#E8E2D6;--cream:#FBF9F4;
+    --rust:#C1552C;--rust-soft:#F3DDD1;--moss:#6B8F71;--moss-soft:#DCE7DD;
+    --ink:#24302B;--ink-soft:#5C6B62;--sand-line:#C9BFA8;--radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;padding:0;background:var(--gravel);}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  .display{font-family:'Space Grotesk',sans-serif;}
+
+  /* Sign-in gate */
+  #gate{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-height:100vh;font-family:'Inter',sans-serif;text-align:center;padding:24px;gap:8px;
+  }
+  #gate img{width:96px;height:96px;border-radius:22px;box-shadow:0 6px 20px rgba(0,0,0,.15);margin-bottom:8px;}
+  #gate h1{font-family:'Space Grotesk',sans-serif;color:var(--pine);margin:6px 0 0;font-size:26px;}
+  #gate p{color:var(--ink-soft);font-size:14px;max-width:340px;margin:2px 0 16px;}
+  #signin-btn{
+    display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--sand-line);
+    padding:11px 20px;border-radius:10px;font-size:15px;font-weight:600;color:var(--ink);
+    cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.06);
+  }
+  #signin-btn:hover{background:var(--cream);}
+  #gate-msg{font-size:12px;color:var(--rust);min-height:16px;margin-top:10px;}
+
+  /* UID banner (shown after first sign-in until rules are set) */
+  #uid-banner{
+    display:none;background:var(--rust-soft);border:1px solid var(--rust);color:#7a2f12;
+    padding:12px 16px;font-size:13px;font-family:'Inter',sans-serif;line-height:1.5;
+  }
+  #uid-banner code{background:#fff;padding:2px 7px;border-radius:5px;font-family:'IBM Plex Mono',monospace;font-size:12px;user-select:all;}
+  #uid-banner button{margin-left:8px;font-size:11px;padding:3px 9px;border:1px solid var(--rust);background:#fff;border-radius:6px;cursor:pointer;color:var(--rust);}
+
+  #app{font-family:'Inter',sans-serif;color:var(--ink);display:flex;min-height:100vh;}
+  #sidebar{width:220px;flex-shrink:0;background:var(--pine);color:var(--gravel);padding:24px 16px;display:flex;flex-direction:column;gap:24px;}
+  #park-name{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:19px;background:transparent;border:none;color:#fff;width:100%;padding:2px 0;border-bottom:1px solid transparent;}
+  #park-name:focus{outline:none;border-bottom:1px solid rgba(255,255,255,0.4);}
+  .tagline{font-size:11px;color:#AFC2B4;letter-spacing:.04em;margin-top:2px;}
+  nav{display:flex;flex-direction:column;gap:2px;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;color:#CBD8CE;user-select:none;}
+  .nav-item:hover{background:var(--pine-light);}
+  .nav-item.active{background:var(--pine-light);color:#fff;}
+  .nav-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5;}
+  .nav-item.active .nav-dot{opacity:1;background:var(--rust);}
+  #sidebar-foot{margin-top:auto;font-size:11px;color:#8CA294;line-height:1.5;}
+  #sync-note{font-family:'IBM Plex Mono',monospace;color:#AFC2B4;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+  .sync-dot{width:7px;height:7px;border-radius:50%;background:var(--moss);flex-shrink:0;}
+  .sync-dot.off{background:#C99;}
+  #user-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  #user-row img{width:24px;height:24px;border-radius:50%;}
+  #user-email{font-size:11px;color:#CBD8CE;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #signout{font-size:11px;color:#AFC2B4;cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;}
+
+  #main{flex:1;padding:32px 40px;overflow-x:hidden;}
+  .view{display:none;}
+  .view.active{display:block;}
+  .view-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:22px;flex-wrap:wrap;gap:12px;}
+  .view-title{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:24px;color:var(--pine);margin:0;}
+  .view-sub{font-size:13px;color:var(--ink-soft);margin-top:4px;}
+  .btn{font-family:'Inter',sans-serif;font-weight:600;font-size:13px;padding:9px 16px;border-radius:8px;border:1px solid transparent;cursor:pointer;}
+  .btn-primary{background:var(--pine);color:#fff;}
+  .btn-primary:hover{background:var(--pine-light);}
+  .btn-ghost{background:transparent;color:var(--pine);border:1px solid var(--sand-line);}
+  .btn-ghost:hover{background:#fff;}
+  .btn-sm{padding:6px 11px;font-size:12px;}
+
+  .stat-row{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:28px;}
+  @media (max-width:1200px){.stat-row{grid-template-columns:repeat(3,1fr);}}
+  .stat-card{background:var(--cream);border:1px solid var(--sand-line);border-radius:var(--radius);padding:16px;}
+  .stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:600;}
+  .stat-value{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;margin-top:6px;color:var(--pine);}
+  .stat-value.rust{color:var(--rust);}
+
+  .lane-label{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.08em;margin:18px 0 8px 2px;}
+  .site-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:12px;}
+  .tile{background:var(--cream);border-radius:8px;padding:12px;cursor:pointer;border-left:4px solid var(--sand-line);box-shadow:0 1px 2px rgba(0,0,0,0.04);position:relative;}
+  .tile:hover{box-shadow:0 4px 10px rgba(0,0,0,0.08);}
+  .tile.occupied{border-left-color:var(--moss);}
+  .tile.overdue{border-left-color:var(--rust);}
+  .tile.reserved{border-left-color:#D99A2B;}
+  .tile-reserved{margin-top:10px;font-size:12px;font-weight:600;color:#9A6A12;display:flex;align-items:center;gap:6px;}
+  .res-dot{width:8px;height:8px;border-radius:50%;background:#D99A2B;flex-shrink:0;}
+  .tile-num{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:16px;color:var(--pine);}
+  .tile-type{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+  .tile-occupant{margin-top:10px;font-size:12px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px;}
+  .avatar{width:20px;height:20px;border-radius:50%;background:var(--moss);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .tile.overdue .avatar{background:var(--rust);}
+  .tile-vacant{margin-top:10px;font-size:12px;color:var(--ink-soft);font-style:italic;}
+  .overdue-pulse{position:absolute;top:10px;right:10px;width:7px;height:7px;border-radius:50%;background:var(--rust);}
+
+  table{width:100%;border-collapse:collapse;background:var(--cream);border-radius:var(--radius);overflow:hidden;border:1px solid var(--sand-line);}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);font-weight:600;padding:10px 14px;background:#F1ECE2;border-bottom:1px solid var(--sand-line);}
+  tbody td{padding:11px 14px;font-size:13px;border-bottom:1px solid #EFEAE0;vertical-align:middle;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:#F6F2EA;}
+  .pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;}
+  .pill-ok{background:var(--moss-soft);color:#3E5C43;}
+  .pill-due{background:var(--rust-soft);color:var(--rust);}
+  .pill-empty{background:#EEE9DE;color:var(--ink-soft);}
+  .row-actions{display:flex;gap:6px;}
+  .icon-btn{background:none;border:none;cursor:pointer;color:var(--ink-soft);font-size:12px;padding:4px 6px;border-radius:6px;}
+  .icon-btn:hover{background:#E9E3D6;color:var(--ink);}
+  .empty-state{text-align:center;padding:50px 20px;color:var(--ink-soft);background:var(--cream);border:1px dashed var(--sand-line);border-radius:var(--radius);}
+  .empty-state .display{color:var(--pine);font-size:16px;margin-bottom:6px;}
+
+  .overlay{display:none;position:fixed;inset:0;background:rgba(31,58,46,0.35);align-items:center;justify-content:center;z-index:50;padding:20px;}
+  .overlay.active{display:flex;}
+  .modal{background:#fff;border-radius:12px;padding:26px;width:100%;max-width:420px;max-height:88vh;overflow-y:auto;}
+  .modal h3{font-family:'Space Grotesk',sans-serif;margin:0 0 4px;color:var(--pine);font-size:18px;}
+  .modal .sub{font-size:12px;color:var(--ink-soft);margin-bottom:18px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:5px;}
+  .field input,.field select,.field textarea{width:100%;padding:9px 10px;border:1px solid var(--sand-line);border-radius:7px;font-family:'Inter',sans-serif;font-size:13px;background:var(--cream);color:var(--ink);}
+  .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--pine);outline-offset:0;}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .modal-actions{display:flex;justify-content:space-between;align-items:center;margin-top:20px;}
+  .modal-actions-right{display:flex;gap:8px;}
+
+  @media (max-width:800px){
+    #app{flex-direction:column;}
+    #sidebar{width:auto;flex-direction:row;align-items:center;flex-wrap:wrap;padding:14px 16px;}
+    nav{flex-direction:row;flex-wrap:wrap;}
+    #sidebar-foot{display:none;}
+    #main{padding:20px;}
+    .stat-row{grid-template-columns:repeat(2,1fr);}
+    .field-row{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Sign-in gate -->
+<div id="gate">
+  <img src="icon-192.png" alt="Oasis RV Park">
+  <h1 class="display">Oasis RV Park</h1>
+  <p>Sign in to open the park ledger. Your data syncs across every device you sign in on.</p>
+  <button id="signin-btn">
+    <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+    Sign in with Google
+  </button>
+  <div id="gate-msg"></div>
+</div>
+
+<!-- Main app -->
+<div id="app" style="display:none">
+  <div id="sidebar">
+    <div>
+      <input id="park-name" class="display" value="Oasis RV Park" />
+      <div class="tagline">SITE LEDGER</div>
+    </div>
+    <nav id="nav">
+      <div class="nav-item active" data-view="overview"><span class="nav-dot"></span>Overview</div>
+      <div class="nav-item" data-view="sites"><span class="nav-dot"></span>Site Map</div>
+      <div class="nav-item" data-view="tenants"><span class="nav-dot"></span>Tenants</div>
+      <div class="nav-item" data-view="payments"><span class="nav-dot"></span>Payments</div>
+    </nav>
+    <div id="sidebar-foot">
+      <div id="user-row"><img id="user-photo" alt=""><span id="user-email"></span></div>
+      <div id="sync-note"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Synced</span></div>
+      <button id="signout">Sign out</button>
+      <div id="backup-row" style="display:flex;gap:6px;margin-top:12px;">
+        <button class="btn btn-ghost btn-sm" id="btn-export" style="flex:1;background:rgba(255,255,255,.06);color:#DCE7DD;border-color:rgba(255,255,255,.18);">Export</button>
+        <button class="btn btn-ghost btn-sm" id="btn-import" style="flex:1;background:rgba(255,255,255,.06);color:#DCE7DD;border-color:rgba(255,255,255,.18);">Import</button>
+        <input type="file" id="import-file" accept="application/json" style="display:none">
+      </div>
+      <div style="margin-top:10px;color:#7E9487;">Rent due day is set per tenant. A site is flagged past due once the day passes with no payment logged for the current month.</div>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="uid-banner">
+      <strong>One-time setup:</strong> your account ID is <code id="uid-code"></code>
+      <button id="copy-uid">Copy</button><br>
+      Paste this into your Firestore security rules (replace <code>YOUR_UID_HERE</code>) so only you can access the data. Once saved, this banner won't affect anything — you can dismiss it. <button id="dismiss-banner">Dismiss</button>
+    </div>
+
+    <div class="view active" id="view-overview">
+      <div class="view-head">
+        <div><h1 class="view-title">Overview</h1><div class="view-sub" id="today-label"></div></div>
+        <button class="btn btn-primary add-site-btn">+ Add site</button>
+      </div>
+      <div class="stat-row" id="stat-row"></div>
+      <div class="lane-label">Site map</div>
+      <div class="site-grid" id="overview-grid"></div>
+    </div>
+
+    <div class="view" id="view-sites">
+      <div class="view-head">
+        <div><h1 class="view-title">Site Map</h1><div class="view-sub">Every lot in the park. Tap a tile to edit or assign a tenant.</div></div>
+        <button class="btn btn-primary add-site-btn">+ Add site</button>
+      </div>
+      <div id="sites-grid-wrap"></div>
+    </div>
+
+    <div class="view" id="view-tenants">
+      <div class="view-head">
+        <div><h1 class="view-title">Tenants</h1><div class="view-sub">Everyone currently or previously renting a site.</div></div>
+        <button class="btn btn-primary" id="btn-add-tenant">+ Add tenant</button>
+      </div>
+      <div id="tenants-table-wrap"></div>
+    </div>
+
+    <div class="view" id="view-payments">
+      <div class="view-head">
+        <div><h1 class="view-title">Payments</h1><div class="view-sub">Rent collected, logged by period.</div></div>
+        <button class="btn btn-primary" id="btn-add-payment">+ Record payment</button>
+      </div>
+      <div id="payments-table-wrap"></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal-body"></div></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+import {
+  getFirestore, doc, collection, onSnapshot, setDoc, deleteDoc, writeBatch,
+  enableIndexedDbPersistence
+} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBE44NoikvJfxMiT-gCzqbn6JVYISiLDPE",
+  authDomain: "oasis-rv-park.firebaseapp.com",
+  projectId: "oasis-rv-park",
+  storageBucket: "oasis-rv-park.firebasestorage.app",
+  messagingSenderId: "719210399035",
+  appId: "1:719210399035:web:62a859f111d1e3df12a31e"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+enableIndexedDbPersistence(db).catch(()=>{ /* multiple tabs or unsupported; sync still works online */ });
+const provider = new GoogleAuthProvider();
+
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+
+let user = null;
+let state = { parkName:'Oasis RV Park', sites:[], tenants:[], payments:[] };
+let unsub = [];
+
+// ---------- auth ----------
+$('#signin-btn').addEventListener('click', async ()=>{
+  $('#gate-msg').textContent = '';
+  try{ await signInWithPopup(auth, provider); }
+  catch(e){ $('#gate-msg').textContent = 'Sign-in failed: ' + (e.code || e.message); }
+});
+$('#signout').addEventListener('click', ()=> signOut(auth));
+
+onAuthStateChanged(auth, u=>{
+  user = u;
+  if(u){
+    $('#gate').style.display = 'none';
+    $('#app').style.display = 'flex';
+    $('#user-email').textContent = u.email || '';
+    if(u.photoURL) $('#user-photo').src = u.photoURL;
+    $('#uid-code').textContent = u.uid;
+    $('#today-label').textContent = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    startSync();
+  } else {
+    $('#gate').style.display = 'flex';
+    $('#app').style.display = 'none';
+    unsub.forEach(fn=>fn()); unsub = [];
+  }
+});
+
+// ---------- firestore paths ----------
+// users/{uid}/meta/park           -> { parkName }
+// users/{uid}/sites/{id}
+// users/{uid}/tenants/{id}
+// users/{uid}/payments/{id}
+function userDoc(...seg){ return doc(db, 'users', user.uid, ...seg); }
+function userCol(name){ return collection(db, 'users', user.uid, name); }
+
+function startSync(){
+  setSync(true);
+  unsub.push(onSnapshot(userDoc('meta','park'), d=>{
+    if(d.exists() && d.data().parkName){ state.parkName = d.data().parkName; $('#park-name').value = state.parkName; }
+  }, syncErr));
+  ['sites','tenants','payments'].forEach(coll=>{
+    unsub.push(onSnapshot(userCol(coll), snap=>{
+      state[coll] = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      setSync(true);
+      renderAll();
+    }, syncErr));
+  });
+}
+function syncErr(e){
+  setSync(false);
+  if(e.code === 'permission-denied'){
+    $('#uid-banner').style.display = 'block';
+    $('#sync-text').textContent = 'Rules not set yet';
+  }
+}
+function setSync(ok){
+  $('#sync-dot').classList.toggle('off', !ok);
+  $('#sync-text').textContent = ok ? 'Synced' : 'Offline';
+}
+
+// ---------- writes ----------
+async function saveSite(s){ await setDoc(userDoc('sites', s.id), stripId(s)); }
+async function saveTenant(t){ await setDoc(userDoc('tenants', t.id), stripId(t)); }
+async function savePayment(p){ await setDoc(userDoc('payments', p.id), stripId(p)); }
+async function removeDoc(coll,id){ await deleteDoc(userDoc(coll, id)); }
+function stripId(o){ const {id, ...rest} = o; return rest; }
+
+$('#park-name').addEventListener('change', async e=>{
+  state.parkName = e.target.value.trim() || 'Oasis RV Park';
+  try{ await setDoc(userDoc('meta','park'), {parkName: state.parkName}); }catch(err){ syncErr(err); }
+});
+
+$('#copy-uid').addEventListener('click', ()=> navigator.clipboard.writeText(user.uid));
+$('#dismiss-banner').addEventListener('click', ()=> $('#uid-banner').style.display='none');
+
+// ---------- backup: export / import ----------
+function exportBackup(){
+  const payload = {
+    _app: 'oasis-rv-park', _version: 1, _exported: new Date().toISOString(),
+    parkName: state.parkName,
+    sites: state.sites, tenants: state.tenants, payments: state.payments
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'oasis-rv-backup-' + todayISO() + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importBackup(file){
+  const r = new FileReader();
+  r.onload = async () => {
+    let data;
+    try{ data = JSON.parse(r.result); }
+    catch(e){ alert('That file is not valid JSON.'); return; }
+    if(!data || !Array.isArray(data.sites)){ alert('That does not look like an Oasis RV backup file.'); return; }
+    const counts = `${data.sites.length} sites, ${(data.tenants||[]).length} tenants, ${(data.payments||[]).length} payments`;
+    if(!confirm('Restore this backup?\n\n'+counts+'\n\nThis MERGES into your current data (matching IDs are overwritten). It does not delete records that are only in the app.')) return;
+    try{
+      const batch = writeBatch(db);
+      if(data.parkName) batch.set(userDoc('meta','park'), {parkName: data.parkName});
+      (data.sites||[]).forEach(s=>{ const {id,...rest}=s; if(id) batch.set(userDoc('sites', id), rest); });
+      (data.tenants||[]).forEach(t=>{ const {id,...rest}=t; if(id) batch.set(userDoc('tenants', id), rest); });
+      (data.payments||[]).forEach(p=>{ const {id,...rest}=p; if(id) batch.set(userDoc('payments', id), rest); });
+      await batch.commit();
+      alert('Backup restored. It may take a moment to sync.');
+    }catch(err){ alert('Restore failed: ' + (err.code||err.message)); }
+  };
+  r.readAsText(file);
+}
+
+$('#btn-export').addEventListener('click', exportBackup);
+$('#btn-import').addEventListener('click', ()=> $('#import-file').click());
+$('#import-file').addEventListener('change', e=>{ if(e.target.files[0]) importBackup(e.target.files[0]); e.target.value=''; });
+
+// ---------- helpers ----------
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+function currentPeriod(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function periodLabel(p){ if(!p) return '—'; const [y,m]=p.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('en-US',{month:'short',year:'numeric'}); }
+function money(n){ return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0}); }
+function initials(name){ return (name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
+function escapeHTML(str){ return String(str==null?'':str).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function tenantForSite(id){ return state.tenants.find(t=>t.site_id===id && t.status!=='moved_out') || null; }
+function isOverdue(t){
+  if(!t || !t.site_id) return false;
+  if(state.payments.some(p=>p.tenant_id===t.id && p.period===currentPeriod())) return false;
+  return new Date().getDate() > Number(t.due_day||1);
+}
+function siteById(id){ return state.sites.find(s=>s.id===id); }
+function tenantById(id){ return state.tenants.find(t=>t.id===id); }
+function sortedSites(){ return [...state.sites].sort((a,b)=> String(a.number).localeCompare(String(b.number), undefined, {numeric:true})); }
+
+// ---------- render ----------
+function renderAll(){ renderOverview(); renderSites(); renderTenants(); renderPayments(); }
+
+function renderOverview(){
+  const occupied = state.sites.filter(s=>tenantForSite(s.id));
+  const reservedCount = state.sites.filter(s=>!tenantForSite(s.id) && s.reserved).length;
+  const overdue = state.tenants.filter(isOverdue);
+  const potential = occupied.reduce((s,x)=>s+Number(x.monthly_rate||0),0);
+  const collected = state.payments.filter(p=>p.period===currentPeriod()).reduce((s,p)=>s+Number(p.amount||0),0);
+  $('#stat-row').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Total sites</div><div class="stat-value">${state.sites.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Occupied</div><div class="stat-value">${occupied.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Vacant</div><div class="stat-value">${state.sites.length-occupied.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Reserved</div><div class="stat-value" style="${reservedCount?'color:#B67D14':''}">${reservedCount}</div></div>
+    <div class="stat-card"><div class="stat-label">Collected · ${periodLabel(currentPeriod())}</div><div class="stat-value">${money(collected)}<span style="font-size:13px;color:var(--ink-soft)"> / ${money(potential)}</span></div></div>
+    <div class="stat-card"><div class="stat-label">Past due</div><div class="stat-value ${overdue.length?'rust':''}">${overdue.length}</div></div>`;
+  $('#overview-grid').innerHTML = tilesHTML(sortedSites());
+}
+function tilesHTML(sites){
+  if(!sites.length) return `<div class="empty-state"><div class="display">No sites mapped yet</div><div style="margin-bottom:14px">Add your first site to start building the park layout.</div><button class="btn btn-primary add-site-btn">+ Add site</button></div>`;
+  return sites.map(s=>{
+    const t = tenantForSite(s.id); const od = t && isOverdue(t);
+    const reserved = !t && s.reserved;
+    let cls='tile'; if(t) cls+= od?' overdue':' occupied'; else if(reserved) cls+=' reserved';
+    let bottom;
+    if(t) bottom = `<div class="tile-occupant"><span class="avatar">${initials(t.name)}</span>${escapeHTML(t.name)}</div>`;
+    else if(reserved) bottom = `<div class="tile-reserved"><span class="res-dot"></span>Reserved · ${money(s.monthly_rate)}/mo</div>`;
+    else bottom = `<div class="tile-vacant">Vacant · ${money(s.monthly_rate)}/mo</div>`;
+    return `<div class="${cls}" data-site="${s.id}">
+      ${od?'<span class="overdue-pulse"></span>':''}
+      <div class="tile-num">#${escapeHTML(s.number)}</div>
+      <div class="tile-type">${escapeHTML(s.type||'—')}${s.hookup?' · '+escapeHTML(s.hookup):''}</div>
+      ${bottom}
+    </div>`;
+  }).join('');
+}
+function renderSites(){
+  $('#sites-grid-wrap').innerHTML = `<div class="lane-label">${state.sites.length} site${state.sites.length===1?'':'s'}</div><div class="site-grid">${tilesHTML(sortedSites())}</div>`;
+}
+function renderTenants(){
+  if(!state.tenants.length){ $('#tenants-table-wrap').innerHTML=`<div class="empty-state"><div class="display">No tenants yet</div>Add a tenant and assign them to a site to start tracking rent.</div>`; return; }
+  const rows = state.tenants.map(t=>{
+    const site=siteById(t.site_id); const od=isOverdue(t);
+    const last=state.payments.filter(p=>p.tenant_id===t.id).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    let pill='<span class="pill pill-empty">No site</span>';
+    if(site) pill = od?'<span class="pill pill-due">Past due</span>':'<span class="pill pill-ok">Current</span>';
+    return `<tr>
+      <td><strong>${escapeHTML(t.name)}</strong><br><span style="color:var(--ink-soft);font-size:11px">${escapeHTML(t.phone||'')}</span></td>
+      <td class="mono">${site?'#'+escapeHTML(site.number):'—'}</td>
+      <td class="mono">${money(t.monthly_rate)}</td>
+      <td class="mono">Day ${t.due_day||'—'}</td>
+      <td class="mono">${last?periodLabel(last.period):'—'}</td>
+      <td>${pill}</td>
+      <td class="row-actions"><button class="icon-btn" data-edit-tenant="${t.id}">Edit</button><button class="icon-btn" data-del-tenant="${t.id}">Remove</button></td>
+    </tr>`;
+  }).join('');
+  $('#tenants-table-wrap').innerHTML=`<table><thead><tr><th>Tenant</th><th>Site</th><th>Rate</th><th>Due day</th><th>Last paid</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function renderPayments(){
+  if(!state.payments.length){ $('#payments-table-wrap').innerHTML=`<div class="empty-state"><div class="display">No payments logged</div>Record a payment as rent comes in to keep the ledger current.</div>`; return; }
+  const rows=[...state.payments].sort((a,b)=>b.date.localeCompare(a.date)).map(p=>{
+    const t=tenantById(p.tenant_id); const site=t?siteById(t.site_id):null;
+    return `<tr><td class="mono">${p.date}</td><td>${t?escapeHTML(t.name):'<em>removed</em>'}</td><td class="mono">${site?'#'+escapeHTML(site.number):'—'}</td><td class="mono">${periodLabel(p.period)}</td><td class="mono">${money(p.amount)}</td><td>${escapeHTML(p.method||'—')}</td><td class="row-actions"><button class="icon-btn" data-del-payment="${p.id}">Delete</button></td></tr>`;
+  }).join('');
+  $('#payments-table-wrap').innerHTML=`<table><thead><tr><th>Date</th><th>Tenant</th><th>Site</th><th>Period</th><th>Amount</th><th>Method</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ---------- nav ----------
+$('#nav').addEventListener('click', e=>{
+  const item=e.target.closest('.nav-item'); if(!item) return;
+  $$('.nav-item').forEach(n=>n.classList.remove('active')); item.classList.add('active');
+  $$('.view').forEach(v=>v.classList.remove('active')); $('#view-'+item.dataset.view).classList.add('active');
+});
+
+// ---------- modal ----------
+function openModal(html){ $('#modal-body').innerHTML=html; $('#overlay').classList.add('active'); }
+function closeModal(){ $('#overlay').classList.remove('active'); $('#modal-body').innerHTML=''; }
+$('#overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') closeModal(); });
+
+// ---------- site form ----------
+function siteForm(site){
+  const edit=!!site;
+  site=site||{number:'',type:'Back-in',hookup:'30 amp',max_length:'',monthly_rate:'',coords:'',notes:'',reserved:false};
+  return `<h3>${edit?'Edit site':'Add site'}</h3><div class="sub">${edit?'Update the details for this lot.':'Add a new lot to the park map.'}</div>
+  <form id="site-form">
+    <div class="field-row">
+      <div class="field"><label>Site number</label><input name="number" required value="${escapeHTML(site.number)}" placeholder="A-12"></div>
+      <div class="field"><label>Monthly rate</label><input name="monthly_rate" type="number" min="0" required value="${site.monthly_rate}" placeholder="450"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Type</label><select name="type">${['Back-in','Pull-through','Long-term','Tent'].map(o=>`<option ${site.type===o?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="field"><label>Power service</label><select name="hookup">${['30 amp','50 amp','30/50 amp','None'].map(o=>`<option ${site.hookup===o?'selected':''}>${o}</option>`).join('')}</select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Max rig length (ft)</label><input name="max_length" type="number" min="0" value="${site.max_length}" placeholder="35"></div>
+      <div class="field"><label>Map coordinates</label><input name="coords" value="${escapeHTML(site.coords||'')}" placeholder="31.76, -106.48"></div>
+    </div>
+    <div class="field" style="display:flex;align-items:center;gap:9px;">
+      <input type="checkbox" name="reserved" id="reserved-chk" ${site.reserved?'checked':''} style="width:auto;margin:0;">
+      <label for="reserved-chk" style="margin:0;">Reserved (hold this site)</label>
+    </div>
+    <div class="field"><label>Notes</label><textarea name="notes" rows="2" placeholder="Shade, pad condition, etc.">${escapeHTML(site.notes)}</textarea></div>
+    <div class="modal-actions"><div>${edit?'<button type="button" class="btn btn-ghost btn-sm" id="site-delete">Delete site</button>':''}</div>
+    <div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Cancel</button><button type="button" id="site-save" class="btn btn-primary">${edit?'Save changes':'Add site'}</button></div></div>
+  </form>`;
+}
+function bindSiteForm(id){
+  $('#modal-cancel').addEventListener('click', closeModal);
+  if(id) $('#site-delete').addEventListener('click', async ()=>{
+    await removeDoc('sites', id);
+    for(const t of state.tenants.filter(t=>t.site_id===id)){ await saveTenant({...t, site_id:null}); }
+    closeModal();
+  });
+  async function submitSite(){
+    const f=new FormData($('#site-form'));
+    const number=(f.get('number')||'').trim();
+    if(!number){ alert('Please enter a site number.'); return; }
+    const btn=$('#site-save'); btn.disabled=true; btn.textContent='Saving…';
+    const data={ number, type:f.get('type'), hookup:f.get('hookup'), max_length:f.get('max_length'), monthly_rate:f.get('monthly_rate'), coords:(f.get('coords')||'').trim(), notes:(f.get('notes')||'').trim(), reserved:f.get('reserved')==='on' };
+    try{
+      await saveSite({ id: id||uid(), ...data });
+      closeModal();
+    }catch(err){
+      btn.disabled=false; btn.textContent=id?'Save changes':'Add site';
+      alert('Could not save: ' + (err.code||err.message||'unknown error') + '\nCheck your connection and try again.');
+    }
+  }
+  $('#site-save').addEventListener('click', submitSite);
+  $('#site-form').addEventListener('submit', e=>{ e.preventDefault(); submitSite(); });
+}
+document.addEventListener('click', e=>{ if(e.target.closest('.add-site-btn')){ openModal(siteForm(null)); bindSiteForm(null); } });
+document.addEventListener('click', e=>{ const tile=e.target.closest('.tile[data-site]'); if(tile){ const s=siteById(tile.dataset.site); if(s){ openModal(siteForm(s)); bindSiteForm(s.id);} } });
+
+// ---------- tenant form ----------
+function siteOptions(selId, exTenant){
+  const taken=new Set(state.tenants.filter(t=>t.id!==exTenant && t.site_id).map(t=>t.site_id));
+  return `<option value="">— Unassigned —</option>`+sortedSites().map(s=>{
+    const dis=taken.has(s.id)&&s.id!==selId;
+    return `<option value="${s.id}" ${s.id===selId?'selected':''} ${dis?'disabled':''}>#${escapeHTML(s.number)}${dis?' (occupied)':''} — ${money(s.monthly_rate)}/mo</option>`;
+  }).join('');
+}
+function tenantForm(t){
+  const edit=!!t;
+  t=t||{name:'',phone:'',email:'',site_id:'',due_day:1,monthly_rate:'',move_in:todayISO(),notes:''};
+  return `<h3>${edit?'Edit tenant':'Add tenant'}</h3><div class="sub">${edit?'Update tenant details or reassign their site.':'Add a renter and assign them to a site.'}</div>
+  <form id="tenant-form">
+    <div class="field"><label>Name</label><input name="name" required value="${escapeHTML(t.name)}" placeholder="Jamie Alvarez"></div>
+    <div class="field-row"><div class="field"><label>Phone</label><input name="phone" value="${escapeHTML(t.phone)}" placeholder="(555) 555-0192"></div>
+    <div class="field"><label>Email</label><input name="email" type="email" value="${escapeHTML(t.email||'')}" placeholder="optional"></div></div>
+    <div class="field"><label>Site</label><select name="site_id">${siteOptions(t.site_id,t.id)}</select></div>
+    <div class="field-row"><div class="field"><label>Monthly rate</label><input name="monthly_rate" type="number" min="0" value="${t.monthly_rate}" placeholder="450"></div>
+    <div class="field"><label>Rent due day</label><input name="due_day" type="number" min="1" max="28" value="${t.due_day}"></div></div>
+    <div class="field"><label>Move-in date</label><input name="move_in" type="date" value="${t.move_in}"></div>
+    <div class="field"><label>Notes</label><textarea name="notes" rows="2" placeholder="Vehicle, pets, arrangements...">${escapeHTML(t.notes)}</textarea></div>
+    <div class="modal-actions"><div>${edit?'<button type="button" class="btn btn-ghost btn-sm" id="tenant-delete">Remove tenant</button>':''}</div>
+    <div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Cancel</button><button type="button" id="tenant-save" class="btn btn-primary">${edit?'Save changes':'Add tenant'}</button></div></div>
+  </form>`;
+}
+function bindTenantForm(id){
+  $('#modal-cancel').addEventListener('click', closeModal);
+  $('[name="site_id"]').addEventListener('change', e=>{
+    const s=siteById(e.target.value); const rf=$('[name="monthly_rate"]');
+    if(s && !rf.value) rf.value=s.monthly_rate;
+  });
+  if(id) $('#tenant-delete').addEventListener('click', async ()=>{ await removeDoc('tenants', id); closeModal(); });
+  async function submitTenant(){
+    const f=new FormData($('#tenant-form'));
+    const name=(f.get('name')||'').trim();
+    if(!name){ alert('Please enter a tenant name.'); return; }
+    const btn=$('#tenant-save'); btn.disabled=true; btn.textContent='Saving…';
+    const data={ name, phone:(f.get('phone')||'').trim(), email:(f.get('email')||'').trim(), site_id:f.get('site_id')||null, monthly_rate:f.get('monthly_rate'), due_day:f.get('due_day'), move_in:f.get('move_in'), notes:(f.get('notes')||'').trim() };
+    try{
+      await saveTenant({ id:id||uid(), ...data });
+      closeModal();
+    }catch(err){
+      btn.disabled=false; btn.textContent=id?'Save changes':'Add tenant';
+      alert('Could not save: ' + (err.code||err.message||'unknown error') + '\nCheck your connection and try again.');
+    }
+  }
+  $('#tenant-save').addEventListener('click', submitTenant);
+  $('#tenant-form').addEventListener('submit', e=>{ e.preventDefault(); submitTenant(); });
+}
+$('#btn-add-tenant').addEventListener('click', ()=>{ openModal(tenantForm(null)); bindTenantForm(null); });
+document.addEventListener('click', async e=>{
+  const ed=e.target.closest('[data-edit-tenant]'); if(ed){ const t=tenantById(ed.dataset.editTenant); openModal(tenantForm(t)); bindTenantForm(t.id); }
+  const del=e.target.closest('[data-del-tenant]'); if(del && confirm('Remove this tenant? Payment history is kept.')){ await removeDoc('tenants', del.dataset.delTenant); }
+});
+
+// ---------- payment form ----------
+function tenantOptions(sel){ return state.tenants.map(t=>{ const s=siteById(t.site_id); return `<option value="${t.id}" ${t.id===sel?'selected':''}>${escapeHTML(t.name)}${s?' — #'+escapeHTML(s.number):''}</option>`; }).join(''); }
+function paymentForm(){
+  if(!state.tenants.length) return `<h3>Record payment</h3><div class="sub">Add a tenant first before logging a payment.</div><div class="modal-actions"><div></div><div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Close</button></div></div>`;
+  const first=state.tenants[0];
+  return `<h3>Record payment</h3><div class="sub">Log rent received from a tenant.</div>
+  <form id="payment-form">
+    <div class="field"><label>Tenant</label><select name="tenant_id">${tenantOptions(first.id)}</select></div>
+    <div class="field-row"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" required value="${first.monthly_rate||''}"></div>
+    <div class="field"><label>Date</label><input name="date" type="date" value="${todayISO()}"></div></div>
+    <div class="field-row"><div class="field"><label>Period covered</label><input name="period" type="month" value="${currentPeriod()}"></div>
+    <div class="field"><label>Method</label><select name="method"><option>Cash</option><option>Check</option><option>Card</option><option>Transfer</option></select></div></div>
+    <div class="field"><label>Notes</label><input name="notes" placeholder="optional"></div>
+    <div class="modal-actions"><div></div><div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Cancel</button><button type="button" id="payment-save" class="btn btn-primary">Record payment</button></div></div>
+  </form>`;
+}
+function bindPaymentForm(){
+  $('#modal-cancel').addEventListener('click', closeModal);
+  const ts=$('[name="tenant_id"]');
+  if(ts) ts.addEventListener('change', e=>{ const t=tenantById(e.target.value); if(t) $('[name="amount"]').value=t.monthly_rate||''; });
+  const form=$('#payment-form');
+  async function submitPayment(){
+    const f=new FormData($('#payment-form'));
+    const amount=f.get('amount');
+    if(amount==='' || amount==null){ alert('Please enter an amount.'); return; }
+    const btn=$('#payment-save'); btn.disabled=true; btn.textContent='Saving…';
+    try{
+      await savePayment({ id:uid(), tenant_id:f.get('tenant_id'), amount, date:f.get('date'), period:f.get('period'), method:f.get('method'), notes:(f.get('notes')||'').trim() });
+      closeModal();
+    }catch(err){
+      btn.disabled=false; btn.textContent='Record payment';
+      alert('Could not save: ' + (err.code||err.message||'unknown error') + '\nCheck your connection and try again.');
+    }
+  }
+  if(form){
+    $('#payment-save').addEventListener('click', submitPayment);
+    form.addEventListener('submit', e=>{ e.preventDefault(); submitPayment(); });
+  }
+}
+$('#btn-add-payment').addEventListener('click', ()=>{ openModal(paymentForm()); bindPaymentForm(); });
+document.addEventListener('click', async e=>{ const del=e.target.closest('[data-del-payment]'); if(del && confirm('Delete this payment record?')){ await removeDoc('payments', del.dataset.delPayment); } });
+</script>
+</body>
+</html>
