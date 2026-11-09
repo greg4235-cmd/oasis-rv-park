@@ -113,6 +113,12 @@
   .pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;}
   .pill-ok{background:var(--moss-soft);color:#3E5C43;}
   .pill-due{background:var(--rust-soft);color:var(--rust);}
+  .pill-soon{background:#FBEAD0;color:#9A6A12;}
+  .tile.soon{border-left-color:#E0A33A;}
+  .tile-sub{margin-top:5px;font-size:11px;line-height:1.3;}
+  .tile-sub.ok{color:var(--ink-soft);}
+  .tile-sub.soon{color:#9A6A12;font-weight:600;}
+  .tile-sub.due{color:var(--rust);font-weight:600;}
   .pill-empty{background:#EEE9DE;color:var(--ink-soft);}
   .row-actions{display:flex;gap:6px;}
   .icon-btn{background:none;border:none;cursor:pointer;color:var(--ink-soft);font-size:12px;padding:4px 6px;border-radius:6px;}
@@ -379,17 +385,79 @@ $('#import-file').addEventListener('change', e=>{ if(e.target.files[0]) importBa
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 function currentPeriod(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
 function periodLabel(p){ if(!p) return '—'; const [y,m]=p.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('en-US',{month:'short',year:'numeric'}); }
-function money(n){ return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0}); }
+function money(n){ const v=Number(n||0); return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}); }
 function initials(name){ return (name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
 function escapeHTML(str){ return String(str==null?'':str).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function tenantForSite(id){ return state.tenants.find(t=>t.site_id===id && t.status!=='moved_out') || null; }
-function isOverdue(t){
-  if(!t || !t.site_id) return false;
-  if(state.payments.some(p=>p.tenant_id===t.id && p.period===currentPeriod())) return false;
-  return new Date().getDate() > Number(t.due_day||1);
+
+// ---- billing engine: everything is day-based ----
+// A tenant has a `rate` and a `cadence` ('daily'|'weekly'|'monthly').
+// Block length in days: daily=1, weekly=7, monthly=30. One full rate buys one block.
+// Day rate = rate / blockDays. A tenant's coverage is measured from move_in,
+// extended one day for every (rate/blockDays) dollars paid.
+function blockDays(cadence){ return cadence==='daily'?1 : cadence==='weekly'?7 : 30; }
+function cadenceLabel(c){ return c==='daily'?'day' : c==='weekly'?'week' : '30 days'; }
+function dayRate(t){
+  const r=Number(t.rate||t.monthly_rate||0); const bd=blockDays(t.cadence||'monthly');
+  return bd>0 ? r/bd : 0;
 }
+function parseISO(d){ if(!d) return null; const [y,m,day]=d.split('-').map(Number); return new Date(y,(m||1)-1,day||1); }
+function addDays(date, n){ const d=new Date(date.getTime()); d.setDate(d.getDate()+n); return d; }
+function isoOf(date){ return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0'); }
+function fmtDate(d){ const dt=(typeof d==='string')?parseISO(d):d; if(!dt) return '—'; return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+function startOfToday(){ const n=new Date(); return new Date(n.getFullYear(),n.getMonth(),n.getDate()); }
+function daysBetween(a,b){ return Math.round((b.getTime()-a.getTime())/86400000); }
+
+// Total dollars this tenant has paid (payments logged in the app).
+function totalPaid(t){ return state.payments.filter(p=>p.tenant_id===t.id).reduce((s,p)=>s+Number(p.amount||0),0); }
+// Days of coverage those dollars buy.
+function daysCovered(t){ const dr=dayRate(t); return dr>0 ? totalPaid(t)/dr : 0; }
+// The date their rent is paid through.
+// Baseline: the `paid_through` seed if set (where they stood when entered),
+// else the day before move-in (nothing covered yet). Logged payments add days on top.
+function coverageBaseline(t){
+  if(t.paid_through){ const s=parseISO(t.paid_through); if(s) return s; }
+  const mi=parseISO(t.move_in); if(mi) return addDays(mi,-1);
+  return null;
+}
+function paidThroughDate(t){
+  const base=coverageBaseline(t); if(!base) return null;
+  const extra=Math.floor(daysCovered(t));
+  return addDays(base, extra);
+}
+// Days of rent still owed as of today (0 if paid ahead). Positive = behind.
+function daysOwed(t){
+  if(!t.site_id) return 0;
+  const pt=paidThroughDate(t); if(!pt) return 0;
+  const today=startOfToday();
+  const d=daysBetween(pt, today); // pt before today -> positive days behind
+  return d>0 ? d : 0;
+}
+// Dollar balance owed as of today.
+function balanceOwed(t){ return Math.round(daysOwed(t)*dayRate(t)); }
+// Days paid ahead of today (0 if behind/current-day).
+function daysAhead(t){
+  const pt=paidThroughDate(t); if(!pt) return 0;
+  const today=startOfToday();
+  const d=daysBetween(today, pt); // pt after today -> positive days ahead
+  return d>0 ? d : 0;
+}
+// Status bucket: 'none' (no site), 'ok' (paid ahead), 'soon' (≤5 days left),
+// 'due' (owes money / lapsed today).
+function tenantStatus(t){
+  if(!t.site_id) return 'none';
+  if(daysOwed(t)>0) return 'due';
+  if(daysAhead(t)<=5) return 'soon';
+  return 'ok';
+}
+function isOverdue(t){ return tenantStatus(t)==='due'; }
+
 function siteById(id){ return state.sites.find(s=>s.id===id); }
 function tenantById(id){ return state.tenants.find(t=>t.id===id); }
+// A site's default rate/cadence (used for vacant/reserved display and prefill).
+function siteRate(s){ return Number(s.rate||s.monthly_rate||0); }
+function siteCadence(s){ return s.cadence||'monthly'; }
+function rateUnit(s){ const c=siteCadence(s); return c==='daily'?'day':c==='weekly'?'wk':'mo'; }
 function sortedSites(){ return [...state.sites].sort((a,b)=> String(a.number).localeCompare(String(b.number), undefined, {numeric:true})); }
 
 // ---------- render ----------
@@ -398,28 +466,42 @@ function renderAll(){ renderOverview(); renderSites(); renderTenants(); renderPa
 function renderOverview(){
   const occupied = state.sites.filter(s=>tenantForSite(s.id));
   const reservedCount = state.sites.filter(s=>!tenantForSite(s.id) && s.reserved).length;
-  const overdue = state.tenants.filter(isOverdue);
-  const potential = occupied.reduce((s,x)=>s+Number(x.monthly_rate||0),0);
-  const collected = state.payments.filter(p=>p.period===currentPeriod()).reduce((s,p)=>s+Number(p.amount||0),0);
+  const activeTenants = state.tenants.filter(t=>t.site_id && t.status!=='moved_out');
+  const overdue = activeTenants.filter(isOverdue);
+  const totalOwed = activeTenants.reduce((s,t)=>s+balanceOwed(t),0);
+  // Collected in the last 30 days (rolling), since billing isn't calendar-locked.
+  const cutoff=isoOf(addDays(startOfToday(),-29));
+  const collected30 = state.payments.filter(p=>p.date>=cutoff).reduce((s,p)=>s+Number(p.amount||0),0);
   $('#stat-row').innerHTML = `
     <div class="stat-card"><div class="stat-label">Total sites</div><div class="stat-value">${state.sites.length}</div></div>
     <div class="stat-card"><div class="stat-label">Occupied</div><div class="stat-value">${occupied.length}</div></div>
     <div class="stat-card"><div class="stat-label">Vacant</div><div class="stat-value">${state.sites.length-occupied.length}</div></div>
     <div class="stat-card"><div class="stat-label">Reserved</div><div class="stat-value" style="${reservedCount?'color:#B67D14':''}">${reservedCount}</div></div>
-    <div class="stat-card"><div class="stat-label">Collected · ${periodLabel(currentPeriod())}</div><div class="stat-value">${money(collected)}<span style="font-size:13px;color:var(--ink-soft)"> / ${money(potential)}</span></div></div>
-    <div class="stat-card"><div class="stat-label">Past due</div><div class="stat-value ${overdue.length?'rust':''}">${overdue.length}</div></div>`;
+    <div class="stat-card"><div class="stat-label">Collected · last 30 days</div><div class="stat-value">${money(collected30)}</div></div>
+    <div class="stat-card"><div class="stat-label">Owed now</div><div class="stat-value ${totalOwed>0?'rust':''}">${money(totalOwed)}<span style="font-size:13px;color:var(--ink-soft)"> · ${overdue.length} behind</span></div></div>`;
   $('#overview-grid').innerHTML = tilesHTML(sortedSites());
 }
 function tilesHTML(sites){
   if(!sites.length) return `<div class="empty-state"><div class="display">No sites mapped yet</div><div style="margin-bottom:14px">Add your first site to start building the park layout.</div><button class="btn btn-primary add-site-btn">+ Add site</button></div>`;
   return sites.map(s=>{
-    const t = tenantForSite(s.id); const od = t && isOverdue(t);
+    const t = tenantForSite(s.id);
+    const st = t ? tenantStatus(t) : null;
+    const od = st==='due';
+    const soon = st==='soon';
     const reserved = !t && s.reserved;
-    let cls='tile'; if(t) cls+= od?' overdue':' occupied'; else if(reserved) cls+=' reserved';
+    let cls='tile';
+    if(t) cls+= od?' overdue' : soon?' soon' : ' occupied';
+    else if(reserved) cls+=' reserved';
     let bottom;
-    if(t) bottom = `<div class="tile-occupant"><span class="avatar">${initials(t.name)}</span>${escapeHTML(t.name)}</div>`;
-    else if(reserved) bottom = `<div class="tile-reserved"><span class="res-dot"></span>Reserved · ${money(s.monthly_rate)}/mo</div>`;
-    else bottom = `<div class="tile-vacant">Vacant · ${money(s.monthly_rate)}/mo</div>`;
+    if(t){
+      let note;
+      if(od){ const bal=balanceOwed(t); note=`<div class="tile-sub due">Owes ${money(bal)} · ${daysOwed(t)}d behind</div>`; }
+      else if(soon){ const a=daysAhead(t); note=`<div class="tile-sub soon">Paid thru ${fmtDate(paidThroughDate(t))} · ${a}d left</div>`; }
+      else { note=`<div class="tile-sub ok">Paid thru ${fmtDate(paidThroughDate(t))}</div>`; }
+      bottom = `<div class="tile-occupant"><span class="avatar">${initials(t.name)}</span>${escapeHTML(t.name)}</div>${note}`;
+    }
+    else if(reserved) bottom = `<div class="tile-reserved"><span class="res-dot"></span>Reserved · ${money(siteRate(s))}/${rateUnit(s)}</div>`;
+    else bottom = `<div class="tile-vacant">Vacant · ${money(siteRate(s))}/${rateUnit(s)}</div>`;
     return `<div class="${cls}" data-site="${s.id}">
       ${od?'<span class="overdue-pulse"></span>':''}
       <div class="tile-num">#${escapeHTML(s.number)}</div>
@@ -433,30 +515,45 @@ function renderSites(){
 }
 function renderTenants(){
   if(!state.tenants.length){ $('#tenants-table-wrap').innerHTML=`<div class="empty-state"><div class="display">No tenants yet</div>Add a tenant and assign them to a site to start tracking rent.</div>`; return; }
-  const rows = state.tenants.map(t=>{
-    const site=siteById(t.site_id); const od=isOverdue(t);
-    const last=state.payments.filter(p=>p.tenant_id===t.id).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  // active tenants first, then moved-out
+  const ordered=[...state.tenants].sort((a,b)=>{
+    const am=a.status==='moved_out'?1:0, bm=b.status==='moved_out'?1:0;
+    if(am!==bm) return am-bm;
+    return (a.name||'').localeCompare(b.name||'');
+  });
+  const rows = ordered.map(t=>{
+    const site=siteById(t.site_id); const st=tenantStatus(t);
+    const rateTxt = money(t.rate||t.monthly_rate)+'/'+(t.cadence==='daily'?'day':t.cadence==='weekly'?'wk':'mo');
     let pill='<span class="pill pill-empty">No site</span>';
-    if(site) pill = od?'<span class="pill pill-due">Past due</span>':'<span class="pill pill-ok">Current</span>';
-    return `<tr>
+    if(t.status==='moved_out') pill='<span class="pill pill-empty">Moved out</span>';
+    else if(site){
+      if(st==='due') pill='<span class="pill pill-due">Owes '+money(balanceOwed(t))+'</span>';
+      else if(st==='soon') pill='<span class="pill pill-soon">'+daysAhead(t)+'d left</span>';
+      else pill='<span class="pill pill-ok">Paid ahead</span>';
+    }
+    const paidThru = (site && t.move_in) ? fmtDate(paidThroughDate(t)) : '—';
+    const balTxt = (site && st==='due') ? money(balanceOwed(t)) : (site?'—':'');
+    return `<tr${t.status==='moved_out'?' style="opacity:.55"':''}>
       <td><strong>${escapeHTML(t.name)}</strong><br><span style="color:var(--ink-soft);font-size:11px">${escapeHTML(t.phone||'')}</span></td>
       <td class="mono">${site?'#'+escapeHTML(site.number):'—'}</td>
-      <td class="mono">${money(t.monthly_rate)}</td>
-      <td class="mono">Day ${t.due_day||'—'}</td>
-      <td class="mono">${last?periodLabel(last.period):'—'}</td>
+      <td class="mono">${rateTxt}</td>
+      <td class="mono">${paidThru}</td>
+      <td class="mono" style="${st==='due'?'color:var(--rust);font-weight:600':''}">${balTxt}</td>
       <td>${pill}</td>
-      <td class="row-actions"><button class="icon-btn" data-edit-tenant="${t.id}">Edit</button><button class="icon-btn" data-del-tenant="${t.id}">Remove</button></td>
+      <td class="row-actions"><button class="icon-btn" data-pay-tenant="${t.id}">+ Pay</button><button class="icon-btn" data-edit-tenant="${t.id}">Edit</button><button class="icon-btn" data-del-tenant="${t.id}">Remove</button></td>
     </tr>`;
   }).join('');
-  $('#tenants-table-wrap').innerHTML=`<table><thead><tr><th>Tenant</th><th>Site</th><th>Rate</th><th>Due day</th><th>Last paid</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('#tenants-table-wrap').innerHTML=`<table><thead><tr><th>Tenant</th><th>Site</th><th>Rate</th><th>Paid through</th><th>Balance</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function renderPayments(){
   if(!state.payments.length){ $('#payments-table-wrap').innerHTML=`<div class="empty-state"><div class="display">No payments logged</div>Record a payment as rent comes in to keep the ledger current.</div>`; return; }
   const rows=[...state.payments].sort((a,b)=>b.date.localeCompare(a.date)).map(p=>{
     const t=tenantById(p.tenant_id); const site=t?siteById(t.site_id):null;
-    return `<tr><td class="mono">${p.date}</td><td>${t?escapeHTML(t.name):'<em>removed</em>'}</td><td class="mono">${site?'#'+escapeHTML(site.number):'—'}</td><td class="mono">${periodLabel(p.period)}</td><td class="mono">${money(p.amount)}</td><td>${escapeHTML(p.method||'—')}</td><td class="row-actions"><button class="icon-btn" data-del-payment="${p.id}">Delete</button></td></tr>`;
+    let covers='—';
+    if(t){ const dr=dayRate(t); if(dr>0){ const d=Math.round(Number(p.amount||0)/dr); covers=d+' day'+(d===1?'':'s'); } }
+    return `<tr><td class="mono">${fmtDate(p.date)}</td><td>${t?escapeHTML(t.name):'<em>removed</em>'}</td><td class="mono">${site?'#'+escapeHTML(site.number):'—'}</td><td class="mono">${money(p.amount)}</td><td class="mono">${covers}</td><td>${escapeHTML(p.method||'—')}</td><td class="row-actions"><button class="icon-btn" data-del-payment="${p.id}">Delete</button></td></tr>`;
   }).join('');
-  $('#payments-table-wrap').innerHTML=`<table><thead><tr><th>Date</th><th>Tenant</th><th>Site</th><th>Period</th><th>Amount</th><th>Method</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  $('#payments-table-wrap').innerHTML=`<table><thead><tr><th>Date</th><th>Tenant</th><th>Site</th><th>Amount</th><th>Covers</th><th>Method</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 // ---------- nav ----------
@@ -474,16 +571,22 @@ $('#overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') closeMo
 // ---------- site form ----------
 function siteForm(site){
   const edit=!!site;
-  site=site||{number:'',type:'Back-in',hookup:'30 amp',max_length:'',monthly_rate:'',coords:'',notes:'',reserved:false};
+  site=site||{number:'',type:'Back-in',hookup:'30 amp',max_length:'',monthly_rate:'',rate:'',cadence:'monthly',coords:'',notes:'',reserved:false};
+  const sRate = site.rate||site.monthly_rate||'';
+  const sCad = site.cadence||'monthly';
   return `<h3>${edit?'Edit site':'Add site'}</h3><div class="sub">${edit?'Update the details for this lot.':'Add a new lot to the park map.'}</div>
   <form id="site-form">
     <div class="field-row">
       <div class="field"><label>Site number</label><input name="number" required value="${escapeHTML(site.number)}" placeholder="A-12"></div>
-      <div class="field"><label>Monthly rate</label><input name="monthly_rate" type="number" min="0" required value="${site.monthly_rate}" placeholder="450"></div>
+      <div class="field"><label>Rate</label><input name="rate" type="number" min="0" required value="${sRate}" placeholder="400"></div>
     </div>
     <div class="field-row">
+      <div class="field"><label>Billing basis</label><select name="cadence">${[['monthly','Monthly (30-day blocks)'],['weekly','Weekly'],['daily','Daily']].map(([v,l])=>`<option value="${v}" ${sCad===v?'selected':''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>Type</label><select name="type">${['Back-in','Pull-through','Long-term','Tent'].map(o=>`<option ${site.type===o?'selected':''}>${o}</option>`).join('')}</select></div>
+    </div>
+    <div class="field-row">
       <div class="field"><label>Power service</label><select name="hookup">${['30 amp','50 amp','30/50 amp','None'].map(o=>`<option ${site.hookup===o?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="field"></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Max rig length (ft)</label><input name="max_length" type="number" min="0" value="${site.max_length}" placeholder="35"></div>
@@ -510,7 +613,8 @@ function bindSiteForm(id){
     const number=(f.get('number')||'').trim();
     if(!number){ alert('Please enter a site number.'); return; }
     const btn=$('#site-save'); btn.disabled=true; btn.textContent='Saving…';
-    const data={ number, type:f.get('type'), hookup:f.get('hookup'), max_length:f.get('max_length'), monthly_rate:f.get('monthly_rate'), coords:(f.get('coords')||'').trim(), notes:(f.get('notes')||'').trim(), reserved:f.get('reserved')==='on' };
+    const rate=f.get('rate');
+    const data={ number, type:f.get('type'), hookup:f.get('hookup'), max_length:f.get('max_length'), rate, monthly_rate:rate, cadence:f.get('cadence')||'monthly', coords:(f.get('coords')||'').trim(), notes:(f.get('notes')||'').trim(), reserved:f.get('reserved')==='on' };
     try{
       await saveSite({ id: id||uid(), ...data });
       closeModal();
@@ -527,24 +631,30 @@ document.addEventListener('click', e=>{ const tile=e.target.closest('.tile[data-
 
 // ---------- tenant form ----------
 function siteOptions(selId, exTenant){
-  const taken=new Set(state.tenants.filter(t=>t.id!==exTenant && t.site_id).map(t=>t.site_id));
+  const taken=new Set(state.tenants.filter(t=>t.id!==exTenant && t.site_id && t.status!=='moved_out').map(t=>t.site_id));
   return `<option value="">— Unassigned —</option>`+sortedSites().map(s=>{
     const dis=taken.has(s.id)&&s.id!==selId;
-    return `<option value="${s.id}" ${s.id===selId?'selected':''} ${dis?'disabled':''}>#${escapeHTML(s.number)}${dis?' (occupied)':''} — ${money(s.monthly_rate)}/mo</option>`;
+    return `<option value="${s.id}" data-rate="${siteRate(s)}" data-cadence="${siteCadence(s)}" ${s.id===selId?'selected':''} ${dis?'disabled':''}>#${escapeHTML(s.number)}${dis?' (occupied)':''} — ${money(siteRate(s))}/${rateUnit(s)}</option>`;
   }).join('');
 }
 function tenantForm(t){
   const edit=!!t;
-  t=t||{name:'',phone:'',email:'',site_id:'',due_day:1,monthly_rate:'',move_in:todayISO(),notes:''};
+  t=t||{name:'',phone:'',email:'',site_id:'',rate:'',monthly_rate:'',cadence:'monthly',move_in:todayISO(),paid_through:'',notes:'',status:'active'};
+  const tRate=t.rate||t.monthly_rate||'';
+  const tCad=t.cadence||'monthly';
+  const movedOut=t.status==='moved_out';
   return `<h3>${edit?'Edit tenant':'Add tenant'}</h3><div class="sub">${edit?'Update tenant details or reassign their site.':'Add a renter and assign them to a site.'}</div>
   <form id="tenant-form">
     <div class="field"><label>Name</label><input name="name" required value="${escapeHTML(t.name)}" placeholder="Jamie Alvarez"></div>
     <div class="field-row"><div class="field"><label>Phone</label><input name="phone" value="${escapeHTML(t.phone)}" placeholder="(555) 555-0192"></div>
     <div class="field"><label>Email</label><input name="email" type="email" value="${escapeHTML(t.email||'')}" placeholder="optional"></div></div>
     <div class="field"><label>Site</label><select name="site_id">${siteOptions(t.site_id,t.id)}</select></div>
-    <div class="field-row"><div class="field"><label>Monthly rate</label><input name="monthly_rate" type="number" min="0" value="${t.monthly_rate}" placeholder="450"></div>
-    <div class="field"><label>Rent due day</label><input name="due_day" type="number" min="1" max="28" value="${t.due_day}"></div></div>
+    <div class="field-row"><div class="field"><label>Rate</label><input name="rate" type="number" min="0" value="${tRate}" placeholder="400"></div>
+    <div class="field"><label>Billing basis</label><select name="cadence">${[['monthly','Monthly (30-day)'],['weekly','Weekly'],['daily','Daily']].map(([v,l])=>`<option value="${v}" ${tCad===v?'selected':''}>${l}</option>`).join('')}</select></div></div>
     <div class="field"><label>Move-in date</label><input name="move_in" type="date" value="${t.move_in}"></div>
+    <div class="field"><label>Rent paid through ${edit?'':'<span style="font-weight:400;color:var(--ink-soft)">(optional — set where they currently stand)</span>'}</label><input name="paid_through" type="date" value="${t.paid_through||''}">
+      <div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">Set this to the last day their rent is currently covered. Payments you log afterward extend it automatically. Leave blank for a brand-new tenant who hasn't paid.</div></div>
+    ${edit?`<div class="field" style="display:flex;align-items:center;gap:9px;"><input type="checkbox" name="moved_out" id="moved-out-chk" ${movedOut?'checked':''} style="width:auto;margin:0;"><label for="moved-out-chk" style="margin:0;">Moved out (frees the site, keeps history)</label></div>`:''}
     <div class="field"><label>Notes</label><textarea name="notes" rows="2" placeholder="Vehicle, pets, arrangements...">${escapeHTML(t.notes)}</textarea></div>
     <div class="modal-actions"><div>${edit?'<button type="button" class="btn btn-ghost btn-sm" id="tenant-delete">Remove tenant</button>':''}</div>
     <div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Cancel</button><button type="button" id="tenant-save" class="btn btn-primary">${edit?'Save changes':'Add tenant'}</button></div></div>
@@ -553,16 +663,21 @@ function tenantForm(t){
 function bindTenantForm(id){
   $('#modal-cancel').addEventListener('click', closeModal);
   $('[name="site_id"]').addEventListener('change', e=>{
-    const s=siteById(e.target.value); const rf=$('[name="monthly_rate"]');
-    if(s && !rf.value) rf.value=s.monthly_rate;
+    const opt=e.target.selectedOptions[0];
+    const rf=$('[name="rate"]'); const cf=$('[name="cadence"]');
+    if(opt && opt.dataset.rate && !rf.value) rf.value=opt.dataset.rate;
+    if(opt && opt.dataset.cadence) cf.value=opt.dataset.cadence;
   });
-  if(id) $('#tenant-delete').addEventListener('click', async ()=>{ await removeDoc('tenants', id); closeModal(); });
+  if(id) $('#tenant-delete').addEventListener('click', async ()=>{ if(confirm('Remove this tenant and their payment history? This cannot be undone. To keep history, use "Moved out" instead.')){ await removeDoc('tenants', id); closeModal(); } });
   async function submitTenant(){
     const f=new FormData($('#tenant-form'));
     const name=(f.get('name')||'').trim();
     if(!name){ alert('Please enter a tenant name.'); return; }
     const btn=$('#tenant-save'); btn.disabled=true; btn.textContent='Saving…';
-    const data={ name, phone:(f.get('phone')||'').trim(), email:(f.get('email')||'').trim(), site_id:f.get('site_id')||null, monthly_rate:f.get('monthly_rate'), due_day:f.get('due_day'), move_in:f.get('move_in'), notes:(f.get('notes')||'').trim() };
+    const rate=f.get('rate');
+    const movedOut=f.get('moved_out')==='on';
+    const data={ name, phone:(f.get('phone')||'').trim(), email:(f.get('email')||'').trim(), site_id:f.get('site_id')||null, rate, monthly_rate:rate, cadence:f.get('cadence')||'monthly', move_in:f.get('move_in'), paid_through:f.get('paid_through')||'', notes:(f.get('notes')||'').trim(), status: movedOut?'moved_out':'active' };
+    if(movedOut) data.site_id=null;
     try{
       await saveTenant({ id:id||uid(), ...data });
       closeModal();
@@ -576,22 +691,27 @@ function bindTenantForm(id){
 }
 $('#btn-add-tenant').addEventListener('click', ()=>{ openModal(tenantForm(null)); bindTenantForm(null); });
 document.addEventListener('click', async e=>{
-  const ed=e.target.closest('[data-edit-tenant]'); if(ed){ const t=tenantById(ed.dataset.editTenant); openModal(tenantForm(t)); bindTenantForm(t.id); }
-  const del=e.target.closest('[data-del-tenant]'); if(del && confirm('Remove this tenant? Payment history is kept.')){ await removeDoc('tenants', del.dataset.delTenant); }
+  const ed=e.target.closest('[data-edit-tenant]'); if(ed){ const t=tenantById(ed.dataset.editTenant); openModal(tenantForm(t)); bindTenantForm(t.id); return; }
+  const pay=e.target.closest('[data-pay-tenant]'); if(pay){ openModal(paymentForm(pay.dataset.payTenant)); bindPaymentForm(); return; }
+  const del=e.target.closest('[data-del-tenant]'); if(del && confirm('Remove this tenant and their payment history? This cannot be undone.\n\nTo keep history and free the site, edit the tenant and check "Moved out" instead.')){ await removeDoc('tenants', del.dataset.delTenant); }
 });
 
 // ---------- payment form ----------
-function tenantOptions(sel){ return state.tenants.map(t=>{ const s=siteById(t.site_id); return `<option value="${t.id}" ${t.id===sel?'selected':''}>${escapeHTML(t.name)}${s?' — #'+escapeHTML(s.number):''}</option>`; }).join(''); }
-function paymentForm(){
-  if(!state.tenants.length) return `<h3>Record payment</h3><div class="sub">Add a tenant first before logging a payment.</div><div class="modal-actions"><div></div><div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Close</button></div></div>`;
-  const first=state.tenants[0];
+function tenantOptions(sel){
+  return state.tenants.filter(t=>t.status!=='moved_out').map(t=>{ const s=siteById(t.site_id); return `<option value="${t.id}" ${t.id===sel?'selected':''}>${escapeHTML(t.name)}${s?' — #'+escapeHTML(s.number):''}</option>`; }).join('');
+}
+function paymentForm(preselectId){
+  const payable=state.tenants.filter(t=>t.status!=='moved_out');
+  if(!payable.length) return `<h3>Record payment</h3><div class="sub">Add a tenant first before logging a payment.</div><div class="modal-actions"><div></div><div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Close</button></div></div>`;
+  const first=preselectId?tenantById(preselectId):payable[0];
+  const r=first.rate||first.monthly_rate||'';
   return `<h3>Record payment</h3><div class="sub">Log rent received from a tenant.</div>
   <form id="payment-form">
     <div class="field"><label>Tenant</label><select name="tenant_id">${tenantOptions(first.id)}</select></div>
-    <div class="field-row"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" required value="${first.monthly_rate||''}"></div>
-    <div class="field"><label>Date</label><input name="date" type="date" value="${todayISO()}"></div></div>
-    <div class="field-row"><div class="field"><label>Period covered</label><input name="period" type="month" value="${currentPeriod()}"></div>
-    <div class="field"><label>Method</label><select name="method"><option>Cash</option><option>Check</option><option>Card</option><option>Transfer</option></select></div></div>
+    <div class="field-row"><div class="field"><label>Amount</label><input name="amount" type="number" min="0" required value="${r}"></div>
+    <div class="field"><label>Date received</label><input name="date" type="date" value="${todayISO()}"></div></div>
+    <div id="pay-preview" class="field" style="background:var(--cream);border:1px solid var(--sand-line);border-radius:7px;padding:9px 11px;font-size:12px;color:var(--ink-soft);"></div>
+    <div class="field"><label>Method</label><select name="method"><option>Cash</option><option>Check</option><option>Card</option><option>Transfer</option></select></div>
     <div class="field"><label>Notes</label><input name="notes" placeholder="optional"></div>
     <div class="modal-actions"><div></div><div class="modal-actions-right"><button type="button" class="btn btn-ghost" id="modal-cancel">Cancel</button><button type="button" id="payment-save" class="btn btn-primary">Record payment</button></div></div>
   </form>`;
@@ -599,7 +719,20 @@ function paymentForm(){
 function bindPaymentForm(){
   $('#modal-cancel').addEventListener('click', closeModal);
   const ts=$('[name="tenant_id"]');
-  if(ts) ts.addEventListener('change', e=>{ const t=tenantById(e.target.value); if(t) $('[name="amount"]').value=t.monthly_rate||''; });
+  const amt=$('[name="amount"]');
+  function updatePreview(){
+    const t=tenantById(ts.value); const el=$('#pay-preview'); if(!t||!el) return;
+    const amount=Number(amt.value||0); const dr=dayRate(t);
+    if(dr<=0 || !amount){ el.textContent='Enter an amount to see how far it covers.'; return; }
+    const daysBought=Math.round(amount/dr);
+    const curThru=paidThroughDate(t);
+    const newThru=curThru?addDays(curThru, daysBought):null;
+    el.innerHTML=`${money(amount)} buys <strong>${daysBought} day${daysBought===1?'':'s'}</strong> at ${money(dr)}/day.`
+      + (newThru?`<br>Paid through would move to <strong>${fmtDate(newThru)}</strong>.`:'');
+  }
+  if(ts) ts.addEventListener('change', ()=>{ const t=tenantById(ts.value); if(t) amt.value=(t.rate||t.monthly_rate||''); updatePreview(); });
+  if(amt) amt.addEventListener('input', updatePreview);
+  updatePreview();
   const form=$('#payment-form');
   async function submitPayment(){
     const f=new FormData($('#payment-form'));
@@ -607,7 +740,7 @@ function bindPaymentForm(){
     if(amount==='' || amount==null){ alert('Please enter an amount.'); return; }
     const btn=$('#payment-save'); btn.disabled=true; btn.textContent='Saving…';
     try{
-      await savePayment({ id:uid(), tenant_id:f.get('tenant_id'), amount, date:f.get('date'), period:f.get('period'), method:f.get('method'), notes:(f.get('notes')||'').trim() });
+      await savePayment({ id:uid(), tenant_id:f.get('tenant_id'), amount, date:f.get('date'), method:f.get('method'), notes:(f.get('notes')||'').trim() });
       closeModal();
     }catch(err){
       btn.disabled=false; btn.textContent='Record payment';
